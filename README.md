@@ -9,7 +9,12 @@ A Python-based cybersecurity log analysis tool that detects brute-force attacks,
 ```
 CyberShield/
 │
-├── app.py                    # Streamlit web interface
+├── app.py                    # Web server & Vercel entrypoint (Flask)
+├── streamlit_app.py          # Streamlit dashboard interface
+├── vercel.json               # Vercel serverless routing configuration
+│
+├── public/
+│   └── index.html            # CyberShield Web UI Dashboard
 │
 ├── analyzer/
 │   ├── __init__.py
@@ -69,11 +74,29 @@ pip install -r requirements.txt
 # 3. (Optional) Create the MySQL database
 mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS cybershield;"
 
-# 4. Run the app
-streamlit run app.py
+# 4. Run the Web Dashboard (Flask / Vercel entrypoint)
+python app.py
+# Accessible at http://127.0.0.1:5000
+
+# OR run with Streamlit:
+python -X utf8 -m streamlit run streamlit_app.py
+# Accessible at http://localhost:8501
 ```
 
-The dashboard will open at **http://localhost:8501**.
+---
+
+## 🌐 Cloud Deployment
+
+### 1. Vercel (Web Serverless Deployment)
+CyberShield is configured for instant deployment on **Vercel**:
+- Root [app.py](file:///d:/R09/My%20Project/CyberShield/app.py) exports the top-level `app` WSGI instance.
+- Static dashboard assets are served from `public/`.
+- Routes and rewrites are managed by `vercel.json`.
+
+### 2. Streamlit Community Cloud
+To host the Streamlit dashboard on [share.streamlit.io](https://share.streamlit.io/):
+- **Repository:** `raj-aparnathi/CyberShield-Cybersecurity-Log-Threat-Detector`
+- **Main file path:** `streamlit_app.py`
 
 ---
 
