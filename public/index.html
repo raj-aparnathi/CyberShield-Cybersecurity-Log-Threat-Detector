@@ -660,7 +660,7 @@
           <input type="file" id="fileInput" accept=".log,.txt" style="display:none" onchange="handleFileSelect(event)">
           <div class="upload-icon" id="uploadIcon">📂</div>
           <div class="upload-text" id="uploadLabel">Drop a server .log file here, or click to browse</div>
-          <div class="upload-subtext">Format: TIMESTAMP | IP | EVENT | STATUS_CODE</div>
+          <div class="upload-subtext">Format: TIMESTAMP | IP | EVENT | STATUS_CODE (Max: 500MB)</div>
         </div>
 
         <div class="button-group">
@@ -950,18 +950,22 @@
     function processFile(file) {
       if (!file) return;
 
-      // File size warning for Vercel 4.5MB serverless limits
-      if (file.size > 15 * 1024 * 1024) {
-        showToast('File exceeds 15MB limit. Please upload a smaller log segment.', '⚠️');
+      // Maximum upload file limit 500MB
+      const MAX_UPLOAD_SIZE = 500 * 1024 * 1024;
+      if (file.size > MAX_UPLOAD_SIZE) {
+        showToast('File exceeds 500MB limit. Please upload a file 500MB or below.', '⚠️');
         document.getElementById('fileInput').value = '';
         return;
       }
 
+      const sizeStr = file.size > 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        : `${(file.size / 1024).toFixed(1)} KB`;
       const uploadLabel = document.getElementById('uploadLabel');
       if (uploadLabel) {
-        uploadLabel.innerText = `Analyzing: ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`;
+        uploadLabel.innerText = `Analyzing: ${file.name} (${sizeStr})...`;
       }
-      showToast(`Uploading ${file.name}...`, '📤');
+      showToast(`Uploading ${file.name} (${sizeStr})...`, '📤');
       setLoading(true);
 
       const formData = new FormData();
@@ -971,9 +975,18 @@
         method: 'POST',
         body: formData
       })
-        .then(res => {
+        .then(async res => {
           if (!res.ok) {
-            return res.json().then(j => { throw new Error(j.error || `Server returned ${res.status}`); });
+            let errMsg = `Server returned ${res.status}`;
+            try {
+              const j = await res.json();
+              errMsg = j.error || errMsg;
+            } catch (e) {
+              if (res.status === 413) {
+                errMsg = 'File exceeds host payload limit. For files up to 500MB, run CyberShield locally (python app.py) or deploy on VPS/Docker.';
+              }
+            }
+            throw new Error(errMsg);
           }
           return res.json();
         })

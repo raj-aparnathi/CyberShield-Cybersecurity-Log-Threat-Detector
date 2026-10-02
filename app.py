@@ -18,7 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from analyzer.log_parser import parse_log_text
+from analyzer.log_parser import parse_log_text, parse_log_stream
 from analyzer.threat_detector import detect_all_threats
 from analyzer.risk_analyzer import enrich_threats_with_risk
 
@@ -35,8 +35,8 @@ app = Flask(
 application = app
 handler = app
 
-# Increase upload limit to 16 MB for large log files
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+# Support upload file limit up to 500 MB
+app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
 
 # Limits for response payload to prevent browser freezing & Vercel timeouts
 MAX_LOG_ENTRIES_IN_RESPONSE = 500
@@ -47,7 +47,7 @@ MAX_TIMESTAMPS_PER_THREAT = 10
 def request_entity_too_large(error):
     return jsonify({
         "success": False,
-        "error": "File size exceeds the 16MB limit. Please upload a smaller log segment."
+        "error": "File size exceeds the 500MB limit. Please upload a log file 500MB or below."
     }), 413
 
 
@@ -105,38 +105,36 @@ def analyze_logs():
       - JSON body: { "log_text": "..." }
       - Raw text body
     """
-    raw_text = ""
+    parsed_logs = None
 
-    # 1. Check for multipart file upload
+    # 1. Check for multipart file upload (stream line-by-line for files up to 500MB)
     if "file" in request.files:
         uploaded = request.files["file"]
         if uploaded and uploaded.filename:
-            raw_text = uploaded.read().decode("utf-8", errors="replace")
+            parsed_logs = parse_log_stream(uploaded.stream)
 
-    # 2. Check for form field
-    if not raw_text and "log_text" in request.form:
-        raw_text = request.form.get("log_text", "")
+    # 2. Check for form field, JSON payload, or raw body text
+    if parsed_logs is None:
+        raw_text = ""
+        if "log_text" in request.form:
+            raw_text = request.form.get("log_text", "")
+        elif request.is_json:
+            data = request.get_json(silent=True) or {}
+            raw_text = data.get("log_text", "")
+        elif request.data:
+            try:
+                raw_text = request.data.decode("utf-8", errors="replace")
+            except Exception:
+                raw_text = ""
 
-    # 3. Check for JSON payload
-    if not raw_text and request.is_json:
-        data = request.get_json(silent=True) or {}
-        raw_text = data.get("log_text", "")
+        if not raw_text or not raw_text.strip():
+            return jsonify({
+                "success": False,
+                "error": "No log content provided. Please upload a .log file or provide log text."
+            }), 400
 
-    # 4. Check for raw body text
-    if not raw_text and request.data:
-        try:
-            raw_text = request.data.decode("utf-8", errors="replace")
-        except Exception:
-            raw_text = ""
-
-    if not raw_text or not raw_text.strip():
-        return jsonify({
-            "success": False,
-            "error": "No log content provided. Please upload a .log file or provide log text."
-        }), 400
-
-    # Step 1: Parse logs
-    parsed_logs = parse_log_text(raw_text)
+        # Parse raw text logs
+        parsed_logs = parse_log_text(raw_text)
 
     # If no lines could be parsed, provide helpful diagnostic guidance
     if not parsed_logs:

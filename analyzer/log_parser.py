@@ -133,3 +133,38 @@ def parse_log_text(text):
 
     logger.info("Parsed %d log entries from uploaded text", len(logs))
     return logs
+
+
+def parse_log_stream(stream):
+    """
+    Parse log lines streaming line-by-line from a file-like object or iterator.
+    Highly memory-efficient for large files up to 500MB.
+
+    Args:
+        stream: An iterable or stream yielding bytes or str lines.
+
+    Returns:
+        list[dict]: List of parsed log entries.
+    """
+    logs = []
+    if stream is None:
+        return logs
+
+    for line_no, raw_line in enumerate(stream, start=1):
+        if isinstance(raw_line, bytes):
+            line = raw_line.decode("utf-8", errors="replace").strip()
+        else:
+            line = str(raw_line).strip()
+
+        if not line:
+            continue
+
+        parsed = parse_log_line(line)
+        if parsed:
+            logs.append(parsed)
+        elif line:
+            logger.debug("Could not parse stream line %d: %s", line_no, line[:80])
+
+    logger.info("Parsed %d log entries from stream", len(logs))
+    return logs
+
