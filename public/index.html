@@ -571,9 +571,25 @@
     }
 
     .status-200 { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
-    .status-401 { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+    .status-400 { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+    .status-401 { background: rgba(251, 146, 60, 0.2); color: #fdba74; }
     .status-403 { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
     .status-404 { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+    .status-500 { background: rgba(225, 29, 72, 0.25); color: #fda4af; }
+
+    .spinner {
+      width: 26px;
+      height: 26px;
+      border: 3px solid rgba(56, 189, 248, 0.2);
+      border-top-color: var(--neon-cyan);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      display: inline-block;
+      margin-bottom: 4px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
 
     /* Footer */
     footer {
@@ -641,7 +657,7 @@
       <div class="control-grid">
         <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
           <input type="file" id="fileInput" accept=".log,.txt" style="display:none" onchange="handleFileSelect(event)">
-          <div class="upload-icon">📂</div>
+          <div class="upload-icon" id="uploadIcon">📂</div>
           <div class="upload-text" id="uploadLabel">Drop a server .log file here, or click to browse</div>
           <div class="upload-subtext">Format: TIMESTAMP | IP | EVENT | STATUS_CODE</div>
         </div>
@@ -654,6 +670,22 @@
             <span>📥 Export CSV Report</span>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- Diagnostic Parse Error Banner -->
+    <div id="parseErrorBanner" style="display:none; margin-bottom: 24px; padding: 18px 22px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 12px; color: #fecaca; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.15);">
+      <div style="display: flex; align-items: flex-start; gap: 14px;">
+        <span style="font-size: 1.5rem; line-height: 1;">⚠️</span>
+        <div style="flex: 1;">
+          <h4 style="margin: 0 0 6px 0; color: #f87171; font-size: 0.95rem; font-weight: 700;">Unrecognized Log Format</h4>
+          <p id="parseErrorMessage" style="margin: 0 0 10px 0; font-size: 0.85rem; color: #cbd5e1; line-height: 1.5;"></p>
+          <div style="background: rgba(15, 23, 42, 0.8); padding: 10px 14px; border-radius: 8px; font-family: var(--font-mono); font-size: 0.82rem; color: #38bdf8; border: 1px solid var(--border-cyber); margin-bottom: 12px; word-break: break-all;">
+            2026-10-02 10:15:22 | 192.168.1.20 | LOGIN_FAILED | 401
+          </div>
+          <button class="btn btn-secondary" style="padding: 6px 14px; font-size: 0.8rem;" onclick="loadSampleData()">Load Working Sample File</button>
+        </div>
+        <button onclick="document.getElementById('parseErrorBanner').style.display='none'" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:1.1rem; padding: 0 4px;">✕</button>
       </div>
     </div>
 
@@ -691,10 +723,10 @@
 
     <!-- Navigation Tabs -->
     <div class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab('analytics')">📊 Visual Analytics</button>
-      <button class="tab-btn" onclick="switchTab('threats')">🚨 Threat Alerts (<span id="threatsCountTab">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('logs')">📜 Log Stream</button>
-      <button class="tab-btn" onclick="switchTab('rules')">🛡️ Detection Rules</button>
+      <button class="tab-btn active" data-tab="analytics" onclick="switchTab('analytics', this)">📊 Visual Analytics</button>
+      <button class="tab-btn" data-tab="threats" onclick="switchTab('threats', this)">🚨 Threat Alerts (<span id="threatsCountTab">0</span>)</button>
+      <button class="tab-btn" data-tab="logs" onclick="switchTab('logs', this)">📜 Log Stream</button>
+      <button class="tab-btn" data-tab="rules" onclick="switchTab('rules', this)">🛡️ Detection Rules</button>
     </div>
 
     <!-- Tab 1: Visual Analytics -->
@@ -810,112 +842,290 @@
       logs: []
     };
 
-    // Tab Switching
-    function switchTab(tabId) {
+    // ─── HTML Sanitizer ──────────────────────────────────────────────────
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // ─── Tab Switching ───────────────────────────────────────────────────
+    function switchTab(tabId, el) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
 
-      event.target.classList.add('active');
+      let btn = el ? el.closest('.tab-btn') : null;
+      if (!btn) {
+        btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+      }
+      if (!btn && typeof event !== 'undefined' && event && event.target) {
+        btn = event.target.closest('.tab-btn');
+      }
+      if (btn) btn.classList.add('active');
+
       const target = document.getElementById(`tab-${tabId}`);
       if (target) target.classList.add('active');
     }
 
-    // Toast notification helper
+    // ─── Toast Notification ──────────────────────────────────────────────
     function showToast(msg, icon = '✅') {
       const toast = document.getElementById('toast');
       document.getElementById('toastMsg').innerText = msg;
       document.getElementById('toastIcon').innerText = icon;
       toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 3500);
+      setTimeout(() => toast.classList.remove('show'), 4500);
     }
 
-    // Drag and drop setup
-    const dropZone = document.getElementById('dropZone');
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.classList.add('dragover');
-    });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-      if (e.dataTransfer.files.length) {
-        processFile(e.dataTransfer.files[0]);
+    // ─── Loading / Spinner State ─────────────────────────────────────────
+    function setLoading(isLoading) {
+      const btnSample = document.getElementById('btnSample');
+      const btnExport = document.getElementById('btnExport');
+      const dropZone = document.getElementById('dropZone');
+      const uploadIcon = document.getElementById('uploadIcon');
+
+      if (isLoading) {
+        if (btnSample) {
+          btnSample.disabled = true;
+          btnSample.style.opacity = '0.5';
+        }
+        if (btnExport) {
+          btnExport.disabled = true;
+          btnExport.style.opacity = '0.5';
+        }
+        if (dropZone) {
+          dropZone.style.opacity = '0.6';
+          dropZone.style.pointerEvents = 'none';
+        }
+        if (uploadIcon) {
+          uploadIcon.innerHTML = '<div class="spinner"></div>';
+        }
+      } else {
+        if (btnSample) {
+          btnSample.disabled = false;
+          btnSample.style.opacity = '1';
+        }
+        if (btnExport) {
+          btnExport.disabled = false;
+          btnExport.style.opacity = '1';
+        }
+        if (dropZone) {
+          dropZone.style.opacity = '1';
+          dropZone.style.pointerEvents = 'auto';
+        }
+        if (uploadIcon) {
+          uploadIcon.innerHTML = '📂';
+        }
       }
-    });
+    }
+
+    // ─── Drag & Drop Event Listeners ─────────────────────────────────────
+    const dropZone = document.getElementById('dropZone');
+    if (dropZone) {
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer && e.dataTransfer.files.length) {
+          processFile(e.dataTransfer.files[0]);
+        }
+      });
+    }
 
     function handleFileSelect(e) {
-      if (e.target.files.length) {
+      if (e.target && e.target.files.length) {
         processFile(e.target.files[0]);
       }
     }
 
+    // ─── File Processing (Multipart FormData Upload) ─────────────────────
     function processFile(file) {
-      document.getElementById('uploadLabel').innerText = `Uploaded: ${file.name}`;
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        analyzeLogText(e.target.result);
-      };
-      reader.readAsText(file);
+      if (!file) return;
+
+      // File size warning for Vercel 4.5MB serverless limits
+      if (file.size > 15 * 1024 * 1024) {
+        showToast('File exceeds 15MB limit. Please upload a smaller log segment.', '⚠️');
+        document.getElementById('fileInput').value = '';
+        return;
+      }
+
+      const uploadLabel = document.getElementById('uploadLabel');
+      if (uploadLabel) {
+        uploadLabel.innerText = `Analyzing: ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`;
+      }
+      showToast(`Uploading ${file.name}...`, '📤');
+      setLoading(true);
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      fetch('/api/analyze', {
+        method: 'POST',
+        body: formData
+      })
+        .then(res => {
+          if (!res.ok) {
+            return res.json().then(j => { throw new Error(j.error || `Server returned ${res.status}`); });
+          }
+          return res.json();
+        })
+        .then(data => {
+          setLoading(false);
+          const fileInput = document.getElementById('fileInput');
+          if (fileInput) fileInput.value = ''; // Reset file input so re-uploading works
+
+          if (data.success) {
+            currentData = data;
+            if (uploadLabel) uploadLabel.innerText = `Uploaded: ${file.name}`;
+
+            if (data.parse_error) {
+              const banner = document.getElementById('parseErrorBanner');
+              if (banner) {
+                document.getElementById('parseErrorMessage').innerText = data.message;
+                banner.style.display = 'block';
+              }
+              showToast('No valid log lines recognized in file.', '⚠️');
+              updateDashboard(data);
+            } else {
+              const banner = document.getElementById('parseErrorBanner');
+              if (banner) banner.style.display = 'none';
+              updateDashboard(data);
+              const truncMsg = data.truncated ? ' (log table limited to 500 rows for performance)' : '';
+              showToast(`Analysis complete: ${data.threats.length} threats from ${data.metrics.total_logs} logs!${truncMsg}`, '🛡️');
+            }
+          } else {
+            showToast(data.error || 'Server returned an error during analysis.', '❌');
+          }
+        })
+        .catch(err => {
+          setLoading(false);
+          console.error('Upload error:', err);
+          const fileInput = document.getElementById('fileInput');
+          if (fileInput) fileInput.value = ''; // Reset file input
+          if (uploadLabel) uploadLabel.innerText = 'Drop a server .log file here, or click to browse';
+          showToast(`Upload failed: ${err.message}`, '❌');
+        });
     }
 
-    // Load sample log data
+    // ─── Load Bundled Sample Data ────────────────────────────────────────
     async function loadSampleData() {
-      showToast('Loading preconfigured sample log...', '⏳');
+      showToast('Loading sample log...', '⏳');
+      setLoading(true);
       try {
         const res = await fetch('/api/sample');
         const data = await res.json();
         if (data.success) {
-          document.getElementById('uploadLabel').innerText = 'Using sample_server.log';
-          analyzeLogText(data.log_content);
+          const uploadLabel = document.getElementById('uploadLabel');
+          if (uploadLabel) uploadLabel.innerText = 'Using sample_server.log';
+          await analyzeLogText(data.log_content);
         } else {
-          showToast('Could not load sample log', '❌');
+          showToast('Could not load sample log.', '❌');
+          setLoading(false);
         }
       } catch (err) {
         console.error(err);
-        showToast('API communication error', '❌');
+        showToast('API communication error.', '❌');
+        setLoading(false);
       }
     }
 
-    // Send log text to /api/analyze
+    // ─── Send Raw Log Text as JSON ───────────────────────────────────────
     async function analyzeLogText(logText) {
       showToast('Analyzing security logs...', '⚙️');
+      setLoading(true);
       try {
         const res = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ log_text: logText })
         });
+        if (!res.ok) {
+          const j = await res.json();
+          throw new Error(j.error || `Server responded with ${res.status}`);
+        }
         const data = await res.json();
+        setLoading(false);
+
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) fileInput.value = '';
+
         if (data.success) {
           currentData = data;
+          if (data.parse_error) {
+            const banner = document.getElementById('parseErrorBanner');
+            if (banner) {
+              document.getElementById('parseErrorMessage').innerText = data.message;
+              banner.style.display = 'block';
+            }
+            showToast(data.message || 'No valid entries found.', '⚠️');
+          } else {
+            const banner = document.getElementById('parseErrorBanner');
+            if (banner) banner.style.display = 'none';
+            showToast(`Analysis complete: ${data.threats.length} threats found!`, '🛡️');
+          }
           updateDashboard(data);
-          showToast(`Analysis complete: ${data.threats.length} threats found!`, '🛡️');
         } else {
-          showToast('Failed to analyze log', '❌');
+          showToast(data.error || 'Failed to analyze log.', '❌');
         }
       } catch (err) {
+        setLoading(false);
         console.error(err);
-        showToast('Error connecting to backend API', '❌');
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput) fileInput.value = '';
+        showToast(`Error: ${err.message}`, '❌');
       }
     }
 
-    // Update UI elements with analyzed data
+    // ─── Update Dashboard UI ─────────────────────────────────────────────
     function updateDashboard(data) {
-      const m = data.metrics;
-      document.getElementById('valTotalLogs').innerText = m.total_logs;
-      document.getElementById('valFailedLogins').innerText = m.failed_logins;
-      document.getElementById('valSuspiciousIps').innerText = m.suspicious_ips_count;
-      document.getElementById('valTotalThreats').innerText = m.total_threats;
-      document.getElementById('threatsCountTab').innerText = m.total_threats;
+      const m = data.metrics || {
+        total_logs: 0,
+        failed_logins: 0,
+        suspicious_ips_count: 0,
+        total_threats: 0,
+        threat_types: {},
+        risk_counts: { HIGH: 0, MEDIUM: 0, LOW: 0 },
+        event_counts: {}
+      };
 
-      renderThreatCards(data.threats);
-      renderLogTable(data.logs);
-      renderEventTable(m.event_counts);
+      animateCounter('valTotalLogs', m.total_logs || 0);
+      animateCounter('valFailedLogins', m.failed_logins || 0);
+      animateCounter('valSuspiciousIps', m.suspicious_ips_count || 0);
+      animateCounter('valTotalThreats', m.total_threats || 0);
+
+      const tabBadge = document.getElementById('threatsCountTab');
+      if (tabBadge) tabBadge.innerText = m.total_threats || 0;
+
+      renderThreatCards(data.threats || []);
+      renderLogTable(data.logs || [], data.truncated, m.total_logs || 0);
+      renderEventTable(m.event_counts || {});
       drawCharts(m);
     }
 
-    // Render threat cards
+    // Counter number animation
+    function animateCounter(elementId, target) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const duration = 500;
+      const start = performance.now();
+      const from = parseInt(el.innerText) || 0;
+      function step(now) {
+        const progress = Math.min((now - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.innerText = Math.round(from + (target - from) * eased);
+        if (progress < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
+
+    // ─── Render Threat Alert Cards ───────────────────────────────────────
     function renderThreatCards(threats) {
       const container = document.getElementById('threatsList');
       if (!threats || threats.length === 0) {
@@ -924,100 +1134,133 @@
       }
 
       container.innerHTML = threats.map((t, idx) => {
-        const riskClass = t.risk.toLowerCase();
+        const riskClass = (t.risk || 'low').toLowerCase();
         const emoji = t.risk === 'HIGH' ? '🔴' : (t.risk === 'MEDIUM' ? '🟡' : '🟢');
-        const timestamps = (t.events || []).slice(0, 3).join(', ');
+        const visibleTimestamps = (t.events || []).slice(0, 5).map(escapeHtml).join(', ');
+        const totalEvts = t.total_events || (t.events || []).length;
+        const remaining = totalEvts - (t.events || []).length;
+        const moreTag = remaining > 0 ? ` <span style="color:#94a3b8; font-style:italic;">(+${remaining} more)</span>` : '';
+        const eventLabel = t.event ? ` (${escapeHtml(t.event)})` : '';
+
         return `
           <div class="threat-card ${riskClass}">
             <div class="threat-info">
-              <h3>${emoji} Threat #${idx + 1} — ${t.threat}</h3>
+              <h3>${emoji} Threat #${idx + 1} — ${escapeHtml(t.threat)}${eventLabel}</h3>
               <div class="threat-meta">
-                <span>Attacker IP: <code>${t.ip}</code></span>
+                <span>Attacker IP: <code>${escapeHtml(t.ip)}</code></span>
                 <span>Occurrences: <strong>${t.count}</strong></span>
-                <span>Timestamps: <small>${timestamps || 'N/A'}</small></span>
+                ${visibleTimestamps ? `<span>Timestamps: <small>${visibleTimestamps}${moreTag}</small></span>` : ''}
               </div>
             </div>
             <div>
-              <span class="badge badge-${riskClass}">${t.risk} RISK</span>
+              <span class="badge badge-${riskClass}">${escapeHtml(t.risk)} RISK</span>
             </div>
           </div>
         `;
       }).join('');
     }
 
-    // Render parsed logs table
-    function renderLogTable(logs) {
+    // ─── Status Code Badge Helper ────────────────────────────────────────
+    function getStatusBadgeClass(statusCode) {
+      const code = parseInt(statusCode, 10);
+      if (code >= 200 && code < 300) return 'status-200';
+      if (code === 401) return 'status-401';
+      if (code === 403) return 'status-403';
+      if (code === 404) return 'status-404';
+      if (code >= 500) return 'status-500';
+      return 'status-400';
+    }
+
+    // ─── Render Parsed Log Table ─────────────────────────────────────────
+    function renderLogTable(logs, truncated, totalCount) {
       const tbody = document.getElementById('logsTableBody');
-      document.getElementById('tableCountBadge').innerText = `${logs.length} records`;
+      const badge = document.getElementById('tableCountBadge');
+      const actual = totalCount || logs.length;
+      const showing = logs.length;
+
+      if (badge) {
+        badge.innerText = truncated
+          ? `Showing ${showing} of ${actual.toLocaleString()} records (truncated for performance)`
+          : `${showing.toLocaleString()} records`;
+      }
 
       if (!logs || logs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#64748b;">No log entries found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#64748b; padding: 24px;">No log entries found.</td></tr>';
         return;
       }
 
       tbody.innerHTML = logs.map(l => {
-        const sc = l.status || 200;
-        const scClass = `status-${sc}` in { 'status-200':1, 'status-401':1, 'status-403':1, 'status-404':1 } ? `status-${sc}` : 'status-200';
+        const sc = l.status || 0;
+        const scClass = getStatusBadgeClass(sc);
         return `
           <tr>
-            <td style="font-family:var(--font-mono); font-size:0.8rem; color:#94a3b8;">${l.timestamp}</td>
-            <td><code style="font-family:var(--font-mono); color:#38bdf8;">${l.ip}</code></td>
-            <td><strong>${l.event}</strong></td>
+            <td style="font-family:var(--font-mono); font-size:0.8rem; color:#94a3b8;">${escapeHtml(l.timestamp || '')}</td>
+            <td><code style="font-family:var(--font-mono); color:#38bdf8;">${escapeHtml(l.ip || '')}</code></td>
+            <td><strong>${escapeHtml(l.event || '')}</strong></td>
             <td><span class="status-badge ${scClass}">${sc}</span></td>
           </tr>
         `;
       }).join('');
     }
 
-    // Filter parsed log table
+    // ─── Filter Parsed Log Table ─────────────────────────────────────────
     function filterLogTable() {
-      const q = document.getElementById('tableFilter').value.toLowerCase();
-      const filtered = currentData.logs.filter(l => 
-        l.ip.toLowerCase().includes(q) || 
-        l.event.toLowerCase().includes(q) || 
-        String(l.status).includes(q) ||
-        l.timestamp.toLowerCase().includes(q)
+      const q = document.getElementById('tableFilter').value.toLowerCase().trim();
+      if (!q) {
+        renderLogTable(currentData.logs || [], currentData.truncated, currentData.metrics?.total_logs);
+        return;
+      }
+      const filtered = (currentData.logs || []).filter(l =>
+        (l.ip || '').toLowerCase().includes(q) ||
+        (l.event || '').toLowerCase().includes(q) ||
+        String(l.status || '').includes(q) ||
+        (l.timestamp || '').toLowerCase().includes(q)
       );
-      renderLogTable(filtered);
+      renderLogTable(filtered, false, filtered.length);
     }
 
-    // Render Event frequency breakdown
+    // ─── Render Event Frequency Breakdown ────────────────────────────────
     function renderEventTable(events) {
       const tbody = document.getElementById('eventBreakdownTable');
-      if (!events || Object.keys(events).length === 0) return;
+      if (!events || Object.keys(events).length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:#64748b; padding: 20px;">No event data available.</td></tr>';
+        return;
+      }
 
-      tbody.innerHTML = Object.entries(events).map(([evt, count]) => {
-        let cat = '<span style="color:#10b981;">Normal Access</span>';
-        if (evt === 'LOGIN_FAILED') cat = '<span style="color:#ef4444; font-weight:700;">Authentication Failure</span>';
-        else if (evt.includes('UNAUTHORIZED') || evt.includes('FORBIDDEN')) cat = '<span style="color:#f59e0b; font-weight:700;">Restricted Access</span>';
+      tbody.innerHTML = Object.entries(events)
+        .sort((a, b) => b[1] - a[1])
+        .map(([evt, count]) => {
+          let cat = '<span style="color:#10b981;">Normal Access</span>';
+          if (evt === 'LOGIN_FAILED') cat = '<span style="color:#ef4444; font-weight:700;">Authentication Failure</span>';
+          else if (evt.includes('UNAUTHORIZED') || evt.includes('FORBIDDEN')) cat = '<span style="color:#f59e0b; font-weight:700;">Restricted Access</span>';
 
-        return `
-          <tr>
-            <td><code>${evt}</code></td>
-            <td><strong>${count}</strong></td>
-            <td>${cat}</td>
-          </tr>
-        `;
-      }).join('');
+          return `
+            <tr>
+              <td><code>${escapeHtml(evt)}</code></td>
+              <td><strong>${count.toLocaleString()}</strong></td>
+              <td>${cat}</td>
+            </tr>
+          `;
+        }).join('');
     }
 
-    // Draw native HTML5 canvas charts
+    // ─── Canvas Charts ───────────────────────────────────────────────────
     function drawCharts(metrics) {
-      drawDonutChart('threatChart', metrics.threat_types);
-      drawBarChart('riskChart', metrics.risk_counts);
+      drawDonutChart('threatChart', metrics.threat_types || {});
+      drawBarChart('riskChart', metrics.risk_counts || {});
     }
 
     function drawDonutChart(canvasId, dataObj) {
       const canvas = document.getElementById(canvasId);
-      if (!canvas) return;
+      if (!canvas || !canvas.parentElement) return;
       const ctx = canvas.getContext('2d');
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = canvas.parentElement.clientWidth * dpr;
-      canvas.height = 200 * dpr;
-      ctx.scale(dpr, dpr);
-
-      const width = canvas.parentElement.clientWidth;
+      const width = canvas.parentElement.clientWidth || 300;
       const height = 200;
+
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, width, height);
 
       const entries = Object.entries(dataObj || {});
@@ -1031,7 +1274,7 @@
         return;
       }
 
-      const colors = ['#ef4444', '#f59e0b', '#38bdf8', '#a855f7', '#10b981'];
+      const colors = ['#ef4444', '#f59e0b', '#38bdf8', '#a855f7', '#10b981', '#ec4899', '#06b6d4'];
       let startAngle = -Math.PI / 2;
       const centerX = width / 3;
       const centerY = height / 2;
@@ -1052,7 +1295,7 @@
       // Legend
       ctx.textAlign = 'left';
       entries.forEach(([key, val], idx) => {
-        const ly = 50 + idx * 26;
+        const ly = 45 + idx * 26;
         ctx.fillStyle = colors[idx % colors.length];
         ctx.fillRect(width * 0.65, ly - 10, 12, 12);
         ctx.fillStyle = '#e2e8f0';
@@ -1063,15 +1306,15 @@
 
     function drawBarChart(canvasId, dataObj) {
       const canvas = document.getElementById(canvasId);
-      if (!canvas) return;
+      if (!canvas || !canvas.parentElement) return;
       const ctx = canvas.getContext('2d');
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = canvas.parentElement.clientWidth * dpr;
-      canvas.height = 200 * dpr;
-      ctx.scale(dpr, dpr);
-
-      const width = canvas.parentElement.clientWidth;
+      const width = canvas.parentElement.clientWidth || 300;
       const height = 200;
+
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, width, height);
 
       const levels = [
@@ -1091,7 +1334,7 @@
         ctx.textAlign = 'left';
         ctx.fillText(lvl.label, 20, y + 16);
 
-        const trackWidth = width - 150;
+        const trackWidth = Math.max(width - 150, 60);
         const barWidth = (lvl.count / maxVal) * trackWidth;
 
         // Background track
@@ -1115,7 +1358,7 @@
       });
     }
 
-    // Export CSV report
+    // ─── Export CSV Report ────────────────────────────────────────────────
     function exportCSVReport() {
       if (!currentData.threats || currentData.threats.length === 0) {
         showToast('No threats to export!', '⚠️');
@@ -1136,10 +1379,11 @@
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      URL.revokeObjectURL(url);
       showToast('CSV Report Downloaded!', '📥');
     }
 
-    // Load sample automatically on startup
+    // ─── Auto-load sample on page load ───────────────────────────────────
     window.addEventListener('DOMContentLoaded', () => {
       loadSampleData();
     });
